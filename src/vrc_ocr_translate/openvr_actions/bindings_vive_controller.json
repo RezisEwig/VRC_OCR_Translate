@@ -1,0 +1,14 @@
+{
+  "action_manifest_version": 0,
+  "bindings": {
+    "/actions/translation": {
+      "sources": [
+        {"inputs": {"click": {"output": "/actions/translation/in/translate"}}, "mode": "button", "path": "/user/hand/left/input/trigger"},
+        {"inputs": {"click": {"output": "/actions/translation/in/clear"}}, "mode": "button", "path": "/user/hand/left/input/grip"}
+      ]
+    }
+  },
+  "controller_type": "vive_controller",
+  "description": "VRC OCR Translate bindings for Vive controllers",
+  "name": "VRC OCR Translate"
+}

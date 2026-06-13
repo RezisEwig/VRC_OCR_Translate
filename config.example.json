@@ -1,0 +1,56 @@
+{
+  "capture": {
+    "source": "vrchat_window",
+    "monitor": 1,
+    "region": null,
+    "interval_ms": 2000,
+    "change_threshold": 2.5,
+    "window_title": "VRChat",
+    "window_class": "UnityWndClass",
+    "restore_minimized_window": true
+  },
+  "ocr": {
+    "confidence_threshold": 0.6,
+    "max_dimension": 1920,
+    "line_cluster_eps": 0.65,
+    "line_max_gap_ratio": 4.0,
+    "languages": ["ja", "en"],
+    "min_latin_letters": 2
+  },
+  "translation": {
+    "source_languages": ["JA", "EN"],
+    "local_model_path": "models/translategemma-4b-it.Q4_K_M.gguf",
+    "local_server_executable": "tools/llama.cpp/b9610/llama-server.exe",
+    "local_server_host": "127.0.0.1",
+    "local_server_port": 18765,
+    "local_context_size": 2048,
+    "local_gpu_layers": "all",
+    "local_startup_timeout_seconds": 45.0,
+    "local_max_tokens": 192,
+    "local_cache_capacity": 512,
+    "request_timeout_seconds": 30.0
+  },
+  "overlay": {
+    "width_px": 1200,
+    "height_px": 260,
+    "width_m": 2.25,
+    "distance_m": 1.2,
+    "vertical_offset_m": 0.0,
+    "font_path": "C:/Windows/Fonts/malgun.ttf",
+    "font_size": 48,
+    "background_alpha": 190,
+    "min_font_size": 18,
+    "max_font_size": 54,
+    "position_offset_x_ratio": -0.1,
+    "position_offset_y_ratio": 0.12,
+    "position_scale_x": 1.0,
+    "position_scale_y": 1.0,
+    "calibration_step_ratio": 0.02,
+    "collision_gap_px": 12
+  },
+  "controls": {
+    "start_mode": "automatic",
+    "poll_interval_ms": 50,
+    "calibration_translate_interval_ms": 1000
+  }
+}
