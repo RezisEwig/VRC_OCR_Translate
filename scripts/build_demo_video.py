@@ -54,7 +54,7 @@ def _make_badge(title: str, detail: str, accent: tuple[int, int, int], output: P
 def _make_preview(ffmpeg: str, video: Path, output: Path) -> None:
     filters = (
         "[0:v]trim=start=3:end=7,setpts=PTS-STARTPTS[v0];"
-        "[0:v]trim=start=21:end=25,setpts=PTS-STARTPTS[v1];"
+        "[0:v]trim=start=26:end=30,setpts=PTS-STARTPTS[v1];"
         "[0:v]trim=start=35:end=39,setpts=PTS-STARTPTS[v2];"
         "[v0][v1][v2]concat=n=3:v=1:a=0,fps=10,"
         "scale=640:-1:flags=lanczos,split[s0][s1];"
