@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,14 +38,6 @@ def _font(size: int) -> ImageFont.FreeTypeFont:
 def _make_intro(hero_path: Path, output: Path) -> None:
     hero = Image.open(hero_path).convert("RGB")
     background = ImageOps.fit(hero, (1920, 1080), method=Image.Resampling.LANCZOS)
-    glow = background.filter(ImageFilter.GaussianBlur(28))
-    background = Image.blend(glow, background, 0.82)
-    draw = ImageDraw.Draw(background, "RGBA")
-    draw.rounded_rectangle((480, 905, 1440, 1015), radius=28, fill=(7, 12, 28, 215))
-    tagline = "로컬 AI로 읽고, 번역하고, VR 위에 띄우다"
-    box = draw.textbbox((0, 0), tagline, font=_font(42))
-    x = (1920 - (box[2] - box[0])) // 2
-    draw.text((x, 932), tagline, font=_font(42), fill=(235, 245, 255, 255))
     background.save(output)
 
 
@@ -59,7 +51,34 @@ def _make_badge(title: str, detail: str, accent: tuple[int, int, int], output: P
     image.save(output)
 
 
-def build(source: Path, hero: Path, output: Path) -> None:
+def _make_preview(ffmpeg: str, video: Path, output: Path) -> None:
+    filters = (
+        "[0:v]trim=start=3:end=7,setpts=PTS-STARTPTS[v0];"
+        "[0:v]trim=start=21:end=25,setpts=PTS-STARTPTS[v1];"
+        "[0:v]trim=start=35:end=39,setpts=PTS-STARTPTS[v2];"
+        "[v0][v1][v2]concat=n=3:v=1:a=0,fps=10,"
+        "scale=640:-1:flags=lanczos,split[s0][s1];"
+        "[s0]palettegen=max_colors=128[p];"
+        "[s1][p]paletteuse=dither=bayer:bayer_scale=4[v]"
+    )
+    _run(
+        [
+            ffmpeg,
+            "-y",
+            "-i",
+            str(video),
+            "-filter_complex",
+            filters,
+            "-map",
+            "[v]",
+            "-loop",
+            "0",
+            str(output),
+        ]
+    )
+
+
+def build(source: Path, hero: Path, output: Path, preview: Path) -> None:
     ffmpeg = _ffmpeg_executable()
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -193,6 +212,7 @@ def build(source: Path, hero: Path, output: Path) -> None:
                 str(output),
             ]
         )
+        _make_preview(ffmpeg, output, preview)
 
 
 def main() -> int:
@@ -208,9 +228,20 @@ def main() -> int:
         type=Path,
         default=ROOT / "assets/demo.mp4",
     )
+    parser.add_argument(
+        "--preview",
+        type=Path,
+        default=ROOT / "assets/demo-preview.gif",
+    )
     args = parser.parse_args()
-    build(args.source.resolve(), args.hero.resolve(), args.output.resolve())
+    build(
+        args.source.resolve(),
+        args.hero.resolve(),
+        args.output.resolve(),
+        args.preview.resolve(),
+    )
     print(f"Demo video written to {args.output.resolve()}")
+    print(f"GIF preview written to {args.preview.resolve()}")
     return 0
 
 

@@ -9,22 +9,23 @@ echo  VRC OCR Translate
 echo ========================================
 echo.
 
-where uv >nul 2>nul
-if errorlevel 1 (
-    echo [ERROR] uv was not found.
-    echo Install uv, then run this file again:
-    echo   winget install --id=astral-sh.uv -e
-    echo.
-    pause
-    exit /b 1
+set "UV_EXE=%~dp0tools\uv\uv.exe"
+if not exist "%UV_EXE%" (
+    for /f "delims=" %%I in ('where uv 2^>nul') do if not defined UV_FOUND set "UV_FOUND=%%I"
+    if defined UV_FOUND set "UV_EXE=%UV_FOUND%"
+)
+if not exist "%UV_EXE%" (
+    echo First run detected. Starting the easy installer...
+    call INSTALL.bat --no-pause
+    if errorlevel 1 (
+        pause
+        exit /b 1
+    )
+    set "UV_EXE=%~dp0tools\uv\uv.exe"
 )
 
 if not exist "config.json" (
-    echo [ERROR] config.json was not found.
-    echo Copy config.example.json to config.json.
-    echo.
-    pause
-    exit /b 1
+    copy /y "config.example.json" "config.json" >nul
 )
 
 if not exist "models\translategemma-4b-it.Q4_K_M.gguf" goto setup_local_ai
@@ -43,7 +44,7 @@ if errorlevel 1 (
 
 :packages
 echo [1/2] Checking required packages...
-uv sync --quiet
+"%UV_EXE%" sync --quiet
 if errorlevel 1 (
     echo.
     echo [ERROR] Package setup failed.
@@ -63,7 +64,7 @@ echo Reset position: Ctrl+Alt+Home (changes are saved automatically)
 echo Press Ctrl+C to stop.
 echo.
 
-uv run vrc-ocr-translate --config config.json
+"%UV_EXE%" run vrc-ocr-translate --config config.json
 set "APP_EXIT_CODE=%ERRORLEVEL%"
 
 echo.

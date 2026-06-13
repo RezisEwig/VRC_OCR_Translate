@@ -30,5 +30,6 @@ rapidocr-test.png
 models/*.gguf
 tools/llama.cpp/b*/
 tools/llama.cpp/*.zip
+tools/uv/
 Thumbs.db
 Desktop.ini
