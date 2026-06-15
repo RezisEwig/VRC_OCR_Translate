@@ -1,4 +1,3 @@
-import json
 from types import SimpleNamespace
 
 import openvr
@@ -7,99 +6,108 @@ from vrc_ocr_translate.app import _translation_mode
 from vrc_ocr_translate.controls import SteamVRControllerInput
 
 
-class _FakeVRInput:
+class _FakeControllerState:
     def __init__(self):
-        self.manifest_path = None
-        self.states = {101: False, 102: False}
-        self.update_count = 0
+        self.ulButtonPressed = 0
+        self.rAxis = [SimpleNamespace(x=0.0, y=0.0) for _ in range(5)]
 
-    def setActionManifestPath(self, path):
-        self.manifest_path = path
 
-    def getActionSetHandle(self, _name):
-        return 100
+class _FakeVRSystem:
+    def __init__(self):
+        self.device_index = 6
+        self.state = _FakeControllerState()
+        self.axis_types = {0: 2, 1: 3, 2: 3}
 
-    def getActionHandle(self, name):
-        return 101 if name.endswith("/translate") else 102
+    def getTrackedDeviceIndexForControllerRole(self, _role):
+        return self.device_index
 
-    def updateActionState(self, _sets):
-        self.update_count += 1
+    def getInt32TrackedDeviceProperty(self, _device_index, property_id):
+        axis_index = property_id - openvr.Prop_Axis0Type_Int32
+        if axis_index not in self.axis_types:
+            raise RuntimeError("axis is unavailable")
+        return self.axis_types[axis_index]
 
-    def getDigitalActionData(self, handle, _device):
-        return SimpleNamespace(bActive=True, bState=self.states[handle])
+    def getStringTrackedDeviceProperty(self, _device_index, _property_id):
+        return "oculus_touch"
+
+    def getControllerState(self, _device_index):
+        return True, self.state
 
 
 class _FakeOpenVR:
-    VRActiveActionSet_t = openvr.VRActiveActionSet_t
-    k_ulInvalidInputValueHandle = openvr.k_ulInvalidInputValueHandle
-    k_ulInvalidActionSetHandle = openvr.k_ulInvalidActionSetHandle
-    k_nActionSetOverlayGlobalPriorityMin = (
-        openvr.k_nActionSetOverlayGlobalPriorityMin
-    )
-
-    def __init__(self, vr_input):
-        self._vr_input = vr_input
-
-    def VRInput(self):
-        return self._vr_input
+    TrackedControllerRole_LeftHand = openvr.TrackedControllerRole_LeftHand
+    k_unTrackedDeviceIndexInvalid = openvr.k_unTrackedDeviceIndexInvalid
+    k_EButton_SteamVR_Trigger = openvr.k_EButton_SteamVR_Trigger
+    k_EButton_Grip = openvr.k_EButton_Grip
+    Prop_ControllerType_String = openvr.Prop_ControllerType_String
+    Prop_Axis0Type_Int32 = openvr.Prop_Axis0Type_Int32
+    Prop_Axis1Type_Int32 = openvr.Prop_Axis1Type_Int32
+    Prop_Axis2Type_Int32 = openvr.Prop_Axis2Type_Int32
+    Prop_Axis3Type_Int32 = openvr.Prop_Axis3Type_Int32
+    Prop_Axis4Type_Int32 = openvr.Prop_Axis4Type_Int32
 
 
-def test_controller_buttons_emit_only_on_rising_edge(tmp_path):
-    manifest = tmp_path / "actions.json"
-    manifest.write_text("{}", encoding="utf-8")
-    fake_input = _FakeVRInput()
+def _controls(system: _FakeVRSystem) -> SteamVRControllerInput:
     controls = SteamVRControllerInput(
-        manifest,
-        openvr_module=_FakeOpenVR(fake_input),
+        openvr_module=_FakeOpenVR(),
+        vr_system=system,
     )
     controls.start()
+    return controls
+
+
+def test_controller_axes_emit_only_on_rising_edge():
+    system = _FakeVRSystem()
+    controls = _controls(system)
 
     assert not controls.poll().translate
-    fake_input.states[101] = True
+    system.state.rAxis[1].x = 0.7
     assert controls.poll().translate
     assert not controls.poll().translate
-    fake_input.states[101] = False
+    system.state.rAxis[1].x = 0.6
     assert not controls.poll().translate
-    fake_input.states[102] = True
+    system.state.rAxis[1].x = 0.5
+    assert not controls.poll().translate
+
+    system.state.rAxis[2].x = 0.7
     assert controls.poll().clear
 
 
-def test_controller_button_held_during_start_does_not_emit(tmp_path):
-    manifest = tmp_path / "actions.json"
-    manifest.write_text("{}", encoding="utf-8")
-    fake_input = _FakeVRInput()
-    fake_input.states[102] = True
+def test_controller_button_held_during_start_does_not_emit():
+    system = _FakeVRSystem()
+    system.state.rAxis[2].x = 0.8
+    controls = _controls(system)
+
+    assert not controls.poll().clear
+    system.state.rAxis[2].x = 0.0
+    assert not controls.poll().clear
+    system.state.rAxis[2].x = 0.8
+    assert controls.poll().clear
+
+
+def test_grip_button_bit_is_supported_without_an_analog_grip_axis():
+    system = _FakeVRSystem()
+    system.axis_types = {0: 2, 1: 3}
+    controls = _controls(system)
+
+    system.state.ulButtonPressed = 1 << openvr.k_EButton_Grip
+    assert controls.poll().clear
+
+
+def test_missing_left_controller_fails_during_start():
+    system = _FakeVRSystem()
+    system.device_index = openvr.k_unTrackedDeviceIndexInvalid
     controls = SteamVRControllerInput(
-        manifest,
-        openvr_module=_FakeOpenVR(fake_input),
+        openvr_module=_FakeOpenVR(),
+        vr_system=system,
     )
 
-    controls.start()
-
-    assert not controls.poll().clear
-    fake_input.states[102] = False
-    assert not controls.poll().clear
-    fake_input.states[102] = True
-    assert controls.poll().clear
-
-
-def test_action_manifest_binds_left_trigger_and_grip():
-    directory = SteamVRControllerInput.default_manifest_path().parent
-    manifest = json.loads((directory / "actions.json").read_text(encoding="utf-8"))
-    controller_types = {item["controller_type"] for item in manifest["default_bindings"]}
-    assert "vd_hand_controller" in controller_types
-    assert "oculus_touch" in controller_types
-
-    for item in manifest["default_bindings"]:
-        binding = json.loads(
-            (directory / item["binding_url"]).read_text(encoding="utf-8")
-        )
-        paths = {
-            source["path"]
-            for source in binding["bindings"]["/actions/translation"]["sources"]
-        }
-        assert "/user/hand/left/input/trigger" in paths
-        assert "/user/hand/left/input/grip" in paths
+    try:
+        controls.start()
+    except RuntimeError as exc:
+        assert "left controller" in str(exc)
+    else:
+        raise AssertionError("missing controller should fail")
 
 
 def test_translation_mode_validation():

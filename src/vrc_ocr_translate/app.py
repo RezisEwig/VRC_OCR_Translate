@@ -72,7 +72,8 @@ class TranslationOverlayApp:
                 self.config.capture.interval_ms,
             )
             LOGGER.info(
-                "Controls: left trigger=translate, left grip=clear, Ctrl+Alt+T=toggle auto/manual"
+                "Controls: left trigger=translate, left grip=clear, Ctrl+Alt+T=toggle "
+                "auto/manual; controller input is passed through to VRChat"
             )
             LOGGER.info(
                 "Position keys: Ctrl+Alt+arrows move, numpad +/- scales, Home resets"

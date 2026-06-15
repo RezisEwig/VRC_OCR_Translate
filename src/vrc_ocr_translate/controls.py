@@ -4,7 +4,6 @@ import ctypes
 import logging
 import os
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 LOGGER = logging.getLogger(__name__)
@@ -38,14 +37,14 @@ class KeyboardModeToggle:
 
 
 class SteamVRControllerInput:
-    ACTION_SET = "/actions/translation"
-    TRANSLATE_ACTION = "/actions/translation/in/translate"
-    CLEAR_ACTION = "/actions/translation/in/clear"
+    PRESS_THRESHOLD = 0.65
+    RELEASE_THRESHOLD = 0.55
+    CONTROLLER_AXIS_TYPE_TRIGGER = 3
 
     def __init__(
         self,
-        manifest_path: str | Path | None = None,
         openvr_module: Any = None,
+        vr_system: Any = None,
     ) -> None:
         if openvr_module is None:
             try:
@@ -53,47 +52,28 @@ class SteamVRControllerInput:
             except ImportError as exc:
                 raise RuntimeError("Controller input requires the 'openvr' package") from exc
         self._openvr = openvr_module
-        self._manifest_path = Path(manifest_path or self.default_manifest_path())
-        self._input: Any = None
-        self._active_sets: Any = None
-        self._translate_handle: int | None = None
-        self._clear_handle: int | None = None
+        self._system = vr_system
+        self._left_device_index: int | None = None
+        self._trigger_axis: int | None = None
+        self._grip_axis: int | None = None
         self._translate_down = False
         self._clear_down = False
 
-    @staticmethod
-    def default_manifest_path() -> Path:
-        return Path(__file__).resolve().parent / "openvr_actions" / "actions.json"
-
     def start(self) -> None:
-        manifest = self._manifest_path.resolve()
-        if not manifest.exists():
-            raise FileNotFoundError(f"OpenVR action manifest was not found: {manifest}")
-
-        vr_input = self._openvr.VRInput()
-        vr_input.setActionManifestPath(str(manifest))
-        action_set_handle = vr_input.getActionSetHandle(self.ACTION_SET)
-        self._translate_handle = vr_input.getActionHandle(self.TRANSLATE_ACTION)
-        self._clear_handle = vr_input.getActionHandle(self.CLEAR_ACTION)
-
-        active_sets = (self._openvr.VRActiveActionSet_t * 1)()
-        active_sets[0].ulActionSet = action_set_handle
-        active_sets[0].ulRestrictedToDevice = self._openvr.k_ulInvalidInputValueHandle
-        active_sets[0].ulSecondaryActionSet = self._openvr.k_ulInvalidActionSetHandle
-        active_sets[0].nPriority = self._openvr.k_nActionSetOverlayGlobalPriorityMin
-        self._input = vr_input
-        self._active_sets = active_sets
-        self._input.updateActionState(self._active_sets)
-        self._translate_down = self._action_down(self._translate_handle)
-        self._clear_down = self._action_down(self._clear_handle)
-        LOGGER.info("SteamVR controller actions loaded: left trigger=translate, grip=clear")
+        if self._system is None:
+            self._system = self._openvr.VRSystem()
+        self._refresh_left_controller(required=True)
+        self._translate_down, self._clear_down = self._read_button_states()
+        LOGGER.info(
+            "Passive SteamVR controller monitoring loaded: left trigger=translate, "
+            "grip=clear; inputs continue to VRChat"
+        )
 
     def poll(self) -> ControlEvents:
-        if self._input is None or self._active_sets is None:
+        if self._system is None:
             return ControlEvents()
-        self._input.updateActionState(self._active_sets)
-        translate_down = self._action_down(self._translate_handle)
-        clear_down = self._action_down(self._clear_handle)
+        self._refresh_left_controller(required=False)
+        translate_down, clear_down = self._read_button_states()
         events = ControlEvents(
             translate=translate_down and not self._translate_down,
             clear=clear_down and not self._clear_down,
@@ -102,11 +82,77 @@ class SteamVRControllerInput:
         self._clear_down = clear_down
         return events
 
-    def _action_down(self, handle: int | None) -> bool:
-        if handle is None:
-            return False
-        data = self._input.getDigitalActionData(
-            handle,
-            self._openvr.k_ulInvalidInputValueHandle,
+    def _refresh_left_controller(self, required: bool) -> None:
+        device_index = self._system.getTrackedDeviceIndexForControllerRole(
+            self._openvr.TrackedControllerRole_LeftHand
         )
-        return bool(data.bActive and data.bState)
+        if device_index == self._openvr.k_unTrackedDeviceIndexInvalid:
+            self._left_device_index = None
+            self._trigger_axis = None
+            self._grip_axis = None
+            if required:
+                raise RuntimeError("SteamVR left controller was not found")
+            return
+        if device_index == self._left_device_index:
+            return
+
+        self._left_device_index = device_index
+        trigger_axes: list[int] = []
+        for axis_index in range(5):
+            property_id = getattr(
+                self._openvr,
+                f"Prop_Axis{axis_index}Type_Int32",
+            )
+            try:
+                axis_type = self._system.getInt32TrackedDeviceProperty(
+                    device_index,
+                    property_id,
+                )
+            except Exception:
+                continue
+            if axis_type == self.CONTROLLER_AXIS_TYPE_TRIGGER:
+                trigger_axes.append(axis_index)
+
+        self._trigger_axis = trigger_axes[0] if trigger_axes else None
+        self._grip_axis = trigger_axes[1] if len(trigger_axes) > 1 else None
+        try:
+            controller_type = self._system.getStringTrackedDeviceProperty(
+                device_index,
+                self._openvr.Prop_ControllerType_String,
+            )
+        except Exception:
+            controller_type = "unknown"
+        LOGGER.info(
+            "Left controller detected: type=%s device=%d trigger_axis=%s grip_axis=%s",
+            controller_type,
+            device_index,
+            self._trigger_axis,
+            self._grip_axis,
+        )
+
+    def _read_button_states(self) -> tuple[bool, bool]:
+        if self._left_device_index is None:
+            return False, False
+        success, state = self._system.getControllerState(self._left_device_index)
+        if not success:
+            return False, False
+
+        trigger_mask = 1 << self._openvr.k_EButton_SteamVR_Trigger
+        grip_mask = 1 << self._openvr.k_EButton_Grip
+        trigger_down = bool(state.ulButtonPressed & trigger_mask) or self._axis_down(
+            state,
+            self._trigger_axis,
+            self._translate_down,
+        )
+        grip_down = bool(state.ulButtonPressed & grip_mask) or self._axis_down(
+            state,
+            self._grip_axis,
+            self._clear_down,
+        )
+        return trigger_down, grip_down
+
+    def _axis_down(self, state: Any, axis_index: int | None, was_down: bool) -> bool:
+        if axis_index is None:
+            return False
+        threshold = self.RELEASE_THRESHOLD if was_down else self.PRESS_THRESHOLD
+        return float(state.rAxis[axis_index].x) >= threshold
