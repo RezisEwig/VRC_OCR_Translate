@@ -51,6 +51,7 @@
   "controls": {
     "start_mode": "automatic",
     "poll_interval_ms": 50,
-    "calibration_translate_interval_ms": 1000
+    "calibration_translate_interval_ms": 1000,
+    "show_panel": true
   }
 }

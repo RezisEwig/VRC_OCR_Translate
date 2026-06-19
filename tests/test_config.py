@@ -14,6 +14,7 @@ def test_loads_defaults_when_file_does_not_exist(tmp_path):
     assert config.capture.interval_ms == 2000
     assert config.controls.start_mode == "automatic"
     assert config.controls.poll_interval_ms == 50
+    assert config.controls.show_panel is True
     assert config.ocr.max_dimension == 1920
     assert config.ocr.languages == ["ja", "en"]
     assert config.translation.local_gpu_layers == "all"

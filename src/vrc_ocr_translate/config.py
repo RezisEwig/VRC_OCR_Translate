@@ -71,6 +71,7 @@ class ControlsConfig:
     start_mode: str = "automatic"
     poll_interval_ms: int = 50
     calibration_translate_interval_ms: int = 1000
+    show_panel: bool = True
 
 
 @dataclass(slots=True)

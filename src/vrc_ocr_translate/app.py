@@ -9,6 +9,7 @@ from .calibration import PositionCalibrationController
 from .capture import create_capture
 from .change_detection import FrameChangeDetector
 from .config import AppConfig
+from .control_panel import ControlPanel, ControlPanelStatus
 from .controls import ControlEvents, KeyboardModeToggle, SteamVRControllerInput
 from .local_pipeline import LocalImageTranslator
 from .overlay import SteamVROverlay
@@ -49,10 +50,28 @@ class TranslationOverlayApp:
         next_automatic_at = time.monotonic()
         calibration = PositionCalibrationController(self.config.overlay, self.config_path)
         keyboard_toggle = KeyboardModeToggle()
+        control_panel: ControlPanel | None = None
+
+        def update_control_panel() -> None:
+            if control_panel is not None:
+                control_panel.update(
+                    ControlPanelStatus.from_overlay(mode, self.config.overlay)
+                )
 
         with ExitStack() as stack:
             translator: Any = stack.enter_context(LocalImageTranslator(self.config))
             overlay = stack.enter_context(SteamVROverlay(self.config.overlay))
+            if self.config.controls.show_panel:
+                try:
+                    control_panel = ControlPanel()
+                    control_panel.start(
+                        ControlPanelStatus.from_overlay(mode, self.config.overlay)
+                    )
+                    stack.callback(control_panel.close)
+                    LOGGER.info("Desktop control panel started")
+                except Exception:
+                    control_panel = None
+                    LOGGER.exception("Desktop control panel could not start")
             controller_input: SteamVRControllerInput | None
             try:
                 controller_input = SteamVRControllerInput()
@@ -97,20 +116,69 @@ class TranslationOverlayApp:
                     LOGGER.info("Translation mode changed: %s", mode)
                     if mode == "automatic":
                         next_automatic_at = time.monotonic()
+                    update_control_panel()
 
-                calibration_changed = calibration.poll()
+                ui_translate = False
+                ui_clear = False
+                ui_calibration_changed = False
+                if control_panel is not None:
+                    for command in control_panel.poll():
+                        if command.name == "translate":
+                            ui_translate = True
+                        elif command.name == "clear":
+                            ui_clear = True
+                        elif command.name == "toggle_mode":
+                            mode = "manual" if mode == "automatic" else "automatic"
+                            LOGGER.info("Translation mode changed from control panel: %s", mode)
+                            if mode == "automatic":
+                                next_automatic_at = time.monotonic()
+                            update_control_panel()
+                        elif command.name == "set_mode" and command.mode is not None:
+                            next_mode = _translation_mode(command.mode)
+                            if next_mode != mode:
+                                mode = next_mode
+                                LOGGER.info(
+                                    "Translation mode changed from control panel: %s",
+                                    mode,
+                                )
+                                if mode == "automatic":
+                                    next_automatic_at = time.monotonic()
+                                update_control_panel()
+                        elif command.name == "move":
+                            ui_calibration_changed |= calibration.move(
+                                command.x_steps,
+                                command.y_steps,
+                            )
+                        elif command.name == "scale":
+                            ui_calibration_changed |= calibration.scale(
+                                command.scale_steps
+                            )
+                        elif command.name == "reset":
+                            ui_calibration_changed |= calibration.reset()
+                        elif command.name == "quit":
+                            LOGGER.info("Exit requested from control panel")
+                            return
+
+                if ui_translate or ui_clear:
+                    events = ControlEvents(
+                        translate=events.translate or ui_translate,
+                        clear=events.clear or ui_clear,
+                    )
+
+                calibration_changed = calibration.poll() or ui_calibration_changed
                 if calibration_changed:
                     if last_frame_size is not None:
                         overlay.update_position(last_frame_size)
                     if last_result is not None and last_frame_size is not None:
                         overlay.show(renderer.render(last_result, last_frame_size))
+                    update_control_panel()
 
                 if events.clear:
                     overlay.hide()
                     previous_signature = ()
                     last_result = None
                     last_frame_size = None
-                    LOGGER.info("Translations cleared by left grip")
+                    LOGGER.info("Translations cleared")
 
                 now = time.monotonic()
                 request_reason: str | None = None
