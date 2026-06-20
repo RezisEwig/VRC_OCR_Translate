@@ -16,7 +16,7 @@ set "UV_DIR=%~dp0tools\uv"
 set "UV_EXE=%UV_DIR%\uv.exe"
 
 if not exist "%UV_EXE%" (
-    echo [1/4] Installing the project launcher...
+    echo [1/5] Installing the project launcher...
     if not exist "%UV_DIR%" mkdir "%UV_DIR%"
     powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$env:UV_INSTALL_DIR='%UV_DIR%'; $env:UV_NO_MODIFY_PATH='1'; irm https://astral.sh/uv/install.ps1 | iex"
     if errorlevel 1 goto install_failed
@@ -27,14 +27,18 @@ if not exist "%UV_EXE%" (
     goto install_failed
 )
 
-echo [2/4] Creating your personal settings...
+echo [2/5] Creating your personal settings...
 if not exist "config.json" copy /y "config.example.json" "config.json" >nul
 
-echo [3/4] Installing Python and required packages...
+echo [3/5] Installing Python and required packages...
 "%UV_EXE%" sync --quiet
 if errorlevel 1 goto install_failed
 
-echo [4/4] Downloading and checking the local AI model...
+echo [4/5] Downloading multilingual OCR models...
+"%UV_EXE%" run vrc-ocr-translate --config config.json --prepare-ocr
+if errorlevel 1 goto install_failed
+
+echo [5/5] Downloading and checking the local AI model...
 call SETUP_LOCAL_AI.bat --no-pause
 if errorlevel 1 goto install_failed
 

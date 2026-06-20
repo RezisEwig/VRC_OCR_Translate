@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,6 +9,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .config import OverlayConfig
 from .models import ImageTranslationResult, TranslationBlock
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -76,11 +79,11 @@ class SubtitleRenderer:
 
 
 class PositionedTranslationRenderer:
-    def __init__(self, config: OverlayConfig) -> None:
+    def __init__(self, config: OverlayConfig, font_path: str | None = None) -> None:
         self.config = config
-        self._font_path = Path(config.font_path)
+        self._font_path = Path(font_path or config.font_path)
         if not self._font_path.exists():
-            raise FileNotFoundError(f"Korean font was not found: {self._font_path}")
+            raise FileNotFoundError(f"Subtitle font was not found: {self._font_path}")
         self._fonts: dict[int, ImageFont.FreeTypeFont] = {}
 
     def render(
@@ -91,11 +94,22 @@ class PositionedTranslationRenderer:
         image = Image.new("RGBA", image_size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
         occupied: list[tuple[int, int, int, int]] = []
+        measured: list[_Bubble] = []
         for block in sorted(result.blocks, key=lambda item: item.bounds.top):
             bubble = self._measure_block(draw, image_size, block)
             rectangle = self._find_position(bubble, image_size, occupied)
             self._draw_bubble(draw, bubble, rectangle)
             occupied.append(rectangle)
+            measured.append(bubble)
+        if measured:
+            LOGGER.info(
+                "Rendered subtitle bubbles: count=%d font=%d-%d max_box=%dx%d",
+                len(measured),
+                min(item.font_size for item in measured),
+                max(item.font_size for item in measured),
+                max(item.width for item in measured),
+                max(item.height for item in measured),
+            )
         return image
 
     def _measure_block(
@@ -105,15 +119,14 @@ class PositionedTranslationRenderer:
         block: TranslationBlock,
     ) -> _Bubble:
         image_width, image_height = image_size
-        average_line_height = block.bounds.height / max(1, block.line_count)
-        font_size = int(average_line_height * 0.82)
+        font_size = self._estimate_font_size(block)
         font_size = max(
             self.config.min_font_size,
             min(self.config.max_font_size, font_size),
         )
         font = self._font(font_size)
-        padding_x = max(10, font_size // 3)
-        padding_y = max(7, font_size // 4)
+        padding_x = max(5, font_size // 3)
+        padding_y = max(3, font_size // 4)
         max_text_width = min(
             int(image_width * 0.55),
             max(180, int(block.bounds.width * 1.35)),
@@ -157,6 +170,19 @@ class PositionedTranslationRenderer:
             desired_left=left,
             desired_top=top,
         )
+
+    def _estimate_font_size(self, block: TranslationBlock) -> int:
+        average_line_height = block.bounds.height / max(1, block.line_count)
+        height_based = average_line_height * 0.82
+        character_count = sum(
+            1 for character in block.source_text if not character.isspace()
+        )
+        if character_count == 0:
+            return int(height_based)
+
+        source_area = max(1, block.bounds.width * block.bounds.height)
+        density_based = math.sqrt(source_area / character_count) * 1.15
+        return int(min(height_based, density_based))
 
     def _find_position(
         self,
@@ -223,7 +249,7 @@ class PositionedTranslationRenderer:
 
         draw.rounded_rectangle(
             (left, top, right, bottom),
-            radius=max(8, bubble.font_size // 3),
+            radius=max(4, bubble.font_size // 3),
             fill=(8, 10, 16, self.config.background_alpha),
             outline=(255, 255, 255, 100),
             width=2,

@@ -1,7 +1,7 @@
 [project]
 name = "vrc-ocr-translate"
 version = "0.1.0"
-description = "Local Japanese and English OCR translation overlay for VRChat"
+description = "Local multilingual OCR translation overlay for VRChat"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = "MIT"

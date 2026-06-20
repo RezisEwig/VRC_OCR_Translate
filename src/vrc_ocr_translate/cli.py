@@ -10,7 +10,8 @@ from pathlib import Path
 from .app import TranslationOverlayApp
 from .capture import ScreenCapture, create_capture
 from .config import AppConfig, load_config
-from .local_ocr import RapidJapaneseOcr
+from .languages import font_path_for_language
+from .local_ocr import RapidMultilingualOcr
 from .local_pipeline import LocalImageTranslator
 from .local_translation import LlamaServer, TranslateGemmaTranslator
 from .overlay import SteamVROverlay
@@ -18,13 +19,18 @@ from .renderer import PositionedTranslationRenderer, SubtitleRenderer
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="VRChat Japanese OCR translation overlay")
+    parser = argparse.ArgumentParser(description="VRChat multilingual OCR translation overlay")
     parser.add_argument("--config", default="config.json", help="JSON configuration path")
     parser.add_argument("--list-monitors", action="store_true", help="list capture monitors")
     parser.add_argument("--demo-overlay", action="store_true", help="show a SteamVR test subtitle")
     parser.add_argument("--render-demo", metavar="PATH", help="render a test subtitle PNG")
     parser.add_argument("--capture-preview", metavar="PATH", help="save the configured capture area")
     parser.add_argument("--check-local", action="store_true", help="test local GPU translation")
+    parser.add_argument(
+        "--prepare-ocr",
+        action="store_true",
+        help="download and initialize the multilingual OCR models",
+    )
     parser.add_argument("--ocr-image", metavar="PATH", help="run RapidOCR on an image")
     parser.add_argument(
         "--translate-image",
@@ -76,8 +82,12 @@ def main() -> None:
                 "謎の美術館へようこそ。出口を探してください。"
             )
         print(f"TranslateGemma OK: {translated}")
-        RapidJapaneseOcr(config.ocr)
+        RapidMultilingualOcr(config.ocr)
         print("RapidOCR OK")
+        return
+    if args.prepare_ocr:
+        RapidMultilingualOcr(config.ocr)
+        print("RapidOCR multilingual models are ready.")
         return
     if args.list_monitors:
         with ScreenCapture(config.capture) as capture:
@@ -99,7 +109,10 @@ def main() -> None:
         from PIL import Image
 
         with Image.open(args.ocr_image) as image:
-            observations = RapidJapaneseOcr(config.ocr).recognize(image.convert("RGB"))
+            observations = RapidMultilingualOcr(
+                config.ocr,
+                config.translation.source_language,
+            ).recognize(image.convert("RGB"))
         print(
             json.dumps(
                 [
@@ -129,7 +142,14 @@ def main() -> None:
         with LocalImageTranslator(config) as translator:
             result = translator.translate(frame)
         output = source.with_name(f"{source.stem}-translated-overlay.png").resolve()
-        PositionedTranslationRenderer(config.overlay).render(result, frame.size).save(output)
+        target_font = font_path_for_language(
+            config.translation.target_language,
+            config.overlay.font_path,
+        )
+        PositionedTranslationRenderer(config.overlay, target_font).render(
+            result,
+            frame.size,
+        ).save(output)
         print(f"blocks={len(result.blocks)}")
         print(output)
         return

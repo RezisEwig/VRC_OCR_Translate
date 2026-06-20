@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import gc
 import logging
 import queue
 import threading
@@ -8,6 +9,13 @@ from dataclasses import dataclass
 from typing import Literal
 
 from .config import OverlayConfig
+from .languages import (
+    AUTO_SOURCE_LANGUAGE,
+    LANGUAGE_CODE_BY_NATIVE_NAME,
+    SUPPORTED_LANGUAGES,
+    get_language,
+    ui_text,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -16,6 +24,8 @@ CommandName = Literal[
     "clear",
     "toggle_mode",
     "set_mode",
+    "set_language",
+    "set_source_language",
     "move",
     "scale",
     "reset",
@@ -27,6 +37,8 @@ CommandName = Literal[
 class ControlPanelCommand:
     name: CommandName
     mode: str | None = None
+    language: str | None = None
+    source_language: str | None = None
     x_steps: int = 0
     y_steps: int = 0
     scale_steps: int = 0
@@ -39,15 +51,25 @@ class ControlPanelStatus:
     offset_y: float
     scale_x: float
     scale_y: float
+    target_language: str
+    source_language: str
 
     @classmethod
-    def from_overlay(cls, mode: str, overlay: OverlayConfig) -> "ControlPanelStatus":
+    def from_overlay(
+        cls,
+        mode: str,
+        overlay: OverlayConfig,
+        target_language: str = "ko",
+        source_language: str = AUTO_SOURCE_LANGUAGE,
+    ) -> "ControlPanelStatus":
         return cls(
             mode=mode,
             offset_x=overlay.position_offset_x_ratio,
             offset_y=overlay.position_offset_y_ratio,
             scale_x=overlay.position_scale_x,
             scale_y=overlay.position_scale_y,
+            target_language=target_language,
+            source_language=source_language,
         )
 
 
@@ -58,15 +80,9 @@ class ControlPanel:
         self._thread: threading.Thread | None = None
 
     def start(self, status: ControlPanelStatus) -> None:
-        try:
-            import tkinter as tk
-            from tkinter import ttk
-        except ImportError as exc:
-            raise RuntimeError("Control panel requires tkinter") from exc
-
         self._thread = threading.Thread(
             target=self._run,
-            args=(tk, ttk, status),
+            args=(status,),
             name="VRC OCR Translate Control Panel",
             daemon=True,
         )
@@ -88,8 +104,23 @@ class ControlPanel:
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=2.0)
 
-    def _run(self, tk: object, ttk: object, initial_status: ControlPanelStatus) -> None:
-        del ttk
+    def _run(self, initial_status: ControlPanelStatus) -> None:
+        try:
+            import tkinter as tk
+            from tkinter import ttk
+        except ImportError:
+            LOGGER.exception("Control panel requires tkinter")
+            return
+
+        self._run_ui(tk, ttk, initial_status)
+        gc.collect()
+
+    def _run_ui(
+        self,
+        tk: object,
+        ttk: object,
+        initial_status: ControlPanelStatus,
+    ) -> None:
         background = "#0B0E14"
         card = "#141925"
         card_hover = "#1B2231"
@@ -123,6 +154,36 @@ class ControlPanel:
 
         mode_var = tk.StringVar()
         detail_var = tk.StringVar()
+        language_var = tk.StringVar()
+        source_language_var = tk.StringVar()
+
+        style = ttk.Style(root)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure(
+            "Dark.TCombobox",
+            fieldbackground=card_hover,
+            background=card_hover,
+            foreground=text,
+            arrowcolor=cyan,
+            bordercolor=border,
+            lightcolor=border,
+            darkcolor=border,
+            padding=(8, 7),
+        )
+        style.map(
+            "Dark.TCombobox",
+            fieldbackground=[("readonly", card_hover)],
+            foreground=[("readonly", text)],
+            selectbackground=[("readonly", card_hover)],
+            selectforeground=[("readonly", text)],
+        )
+        root.option_add("*TCombobox*Listbox.background", card_hover)
+        root.option_add("*TCombobox*Listbox.foreground", text)
+        root.option_add("*TCombobox*Listbox.selectBackground", cyan_dark)
+        root.option_add("*TCombobox*Listbox.selectForeground", text)
 
         def set_button_colors(
             widget: object,
@@ -183,13 +244,65 @@ class ControlPanel:
             enqueue(ControlPanelCommand("quit"))
             root.destroy()
 
+        def request_language(_event: object = None) -> None:
+            code = LANGUAGE_CODE_BY_NATIVE_NAME.get(language_var.get())
+            if code is not None:
+                enqueue(ControlPanelCommand("set_language", language=code))
+
+        def request_source_language(_event: object = None) -> None:
+            index = source_language_combo.current()
+            if index < 0:
+                return
+            code = (
+                AUTO_SOURCE_LANGUAGE
+                if index == 0
+                else SUPPORTED_LANGUAGES[index - 1].code
+            )
+            enqueue(
+                ControlPanelCommand(
+                    "set_source_language",
+                    source_language=code,
+                )
+            )
+
         def apply_status(status: ControlPanelStatus) -> None:
-            mode_label = "자동 번역" if status.mode == "automatic" else "수동 번역"
-            mode_var.set(f"●  {mode_label} 중")
+            language = get_language(status.target_language)
+            mode_key = "status_auto" if status.mode == "automatic" else "status_manual"
+            mode_var.set(f"●  {ui_text(language.code, mode_key)}")
+            language_var.set(language.native_name)
+            source_values = (
+                ui_text(language.code, "auto_detect"),
+                *(item.native_name for item in SUPPORTED_LANGUAGES),
+            )
+            source_language_combo.configure(values=source_values)
+            if status.source_language == AUTO_SOURCE_LANGUAGE:
+                source_language_combo.current(0)
+            else:
+                source_index = next(
+                    index
+                    for index, item in enumerate(SUPPORTED_LANGUAGES, 1)
+                    if item.code == status.source_language
+                )
+                source_language_combo.current(source_index)
             detail_var.set(
                 f"X {status.offset_x:+.3f}   Y {status.offset_y:+.3f}   "
                 f"Scale {status.scale_x:.2f}x"
             )
+            subtitle_label.configure(text=ui_text(language.code, "local_translation"))
+            language_label.configure(text=ui_text(language.code, "my_language"))
+            source_language_label.configure(
+                text=ui_text(language.code, "source_language")
+            )
+            auto_button.configure(text=ui_text(language.code, "automatic"))
+            manual_button.configure(text=ui_text(language.code, "manual"))
+            quick_actions_label.configure(text=ui_text(language.code, "quick_actions"))
+            translate_button.configure(text=ui_text(language.code, "translate_now"))
+            clear_button.configure(text=ui_text(language.code, "clear"))
+            position_label.configure(text=ui_text(language.code, "position"))
+            shrink_button.configure(text=f"−  {ui_text(language.code, 'shrink')}")
+            grow_button.configure(text=f"+  {ui_text(language.code, 'enlarge')}")
+            shortcut_label.configure(text=ui_text(language.code, "shortcut"))
+            quit_button.configure(text=ui_text(language.code, "quit"))
             if status.mode == "automatic":
                 set_button_colors(auto_button, cyan, "#72E1FF", background)
                 set_button_colors(manual_button, card_hover, border, muted)
@@ -223,13 +336,80 @@ class ControlPanel:
             foreground=text,
             font=("Segoe UI", 14, "bold"),
         ).grid(row=0, column=1, sticky="sw")
-        tk.Label(
+        subtitle_label = tk.Label(
             header,
             text="LOCAL VR TRANSLATION",
             background=background,
             foreground=muted,
             font=("Segoe UI", 8, "normal"),
-        ).grid(row=1, column=1, sticky="nw")
+        )
+        subtitle_label.grid(row=1, column=1, sticky="nw")
+
+        language_card = tk.Frame(
+            outer,
+            background=card,
+            highlightbackground=border,
+            highlightthickness=1,
+            padx=14,
+            pady=10,
+        )
+        language_card.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        language_card.grid_columnconfigure(1, weight=1)
+        language_label = tk.Label(
+            language_card,
+            text="내 언어",
+            background=card,
+            foreground=muted,
+            font=("Malgun Gothic", 9, "bold"),
+        )
+        language_label.grid(row=0, column=0, sticky="w", padx=(0, 12))
+        language_combo = ttk.Combobox(
+            language_card,
+            textvariable=language_var,
+            values=tuple(language.native_name for language in SUPPORTED_LANGUAGES),
+            state="readonly",
+            style="Dark.TCombobox",
+            width=23,
+            cursor="hand2",
+            font=("Segoe UI", 10),
+        )
+        language_combo.grid(row=0, column=1, sticky="ew")
+        language_combo.bind("<<ComboboxSelected>>", request_language)
+
+        source_language_label = tk.Label(
+            language_card,
+            text="번역할 언어",
+            background=card,
+            foreground=muted,
+            font=("Malgun Gothic", 9, "bold"),
+        )
+        source_language_label.grid(
+            row=1,
+            column=0,
+            sticky="w",
+            padx=(0, 12),
+            pady=(9, 0),
+        )
+        source_language_combo = ttk.Combobox(
+            language_card,
+            textvariable=source_language_var,
+            values=("자동 인식",),
+            state="readonly",
+            style="Dark.TCombobox",
+            width=23,
+            cursor="hand2",
+            font=("Segoe UI", 10),
+        )
+        source_language_combo.grid(
+            row=1,
+            column=1,
+            sticky="ew",
+            pady=(9, 0),
+        )
+        source_language_combo.bind(
+            "<<ComboboxSelected>>",
+            request_source_language,
+        )
 
         mode_card = tk.Frame(
             outer,
@@ -239,7 +419,7 @@ class ControlPanel:
             padx=14,
             pady=12,
         )
-        mode_card.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        mode_card.grid(row=2, column=0, sticky="ew", pady=(0, 10))
         mode_card.grid_columnconfigure(0, weight=1)
         mode_card.grid_columnconfigure(1, weight=1)
         status_label = tk.Label(
@@ -271,16 +451,17 @@ class ControlPanel:
             padx=14,
             pady=12,
         )
-        action_card.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        action_card.grid(row=3, column=0, sticky="ew", pady=(0, 10))
         action_card.grid_columnconfigure(0, weight=2)
         action_card.grid_columnconfigure(1, weight=1)
-        tk.Label(
+        quick_actions_label = tk.Label(
             action_card,
             text="빠른 동작",
             background=card,
             foreground=muted,
             font=("Malgun Gothic", 9, "bold"),
-        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        )
+        quick_actions_label.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
         translate_button = make_button(
             action_card,
             "지금 번역",
@@ -310,17 +491,18 @@ class ControlPanel:
             padx=14,
             pady=12,
         )
-        position_card.grid(row=3, column=0, sticky="ew", pady=(0, 10))
+        position_card.grid(row=4, column=0, sticky="ew", pady=(0, 10))
         position_card.grid_columnconfigure(0, weight=1)
         position_card.grid_columnconfigure(1, weight=1)
         position_card.grid_columnconfigure(2, weight=1)
-        tk.Label(
+        position_label = tk.Label(
             position_card,
             text="자막 위치",
             background=card,
             foreground=text,
             font=("Malgun Gothic", 10, "bold"),
-        ).grid(row=0, column=0, sticky="w")
+        )
+        position_label.grid(row=0, column=0, sticky="w")
         tk.Label(
             position_card,
             textvariable=detail_var,
@@ -364,15 +546,16 @@ class ControlPanel:
         grow_button.grid(row=4, column=1, columnspan=2, sticky="ew", padx=(3, 4), pady=(8, 2))
 
         footer = tk.Frame(outer, background=background)
-        footer.grid(row=4, column=0, sticky="ew")
+        footer.grid(row=5, column=0, sticky="ew")
         footer.grid_columnconfigure(0, weight=1)
-        tk.Label(
+        shortcut_label = tk.Label(
             footer,
             text="Ctrl + Alt + T  모드 전환",
             background=background,
             foreground=muted,
             font=("Malgun Gothic", 8, "normal"),
-        ).grid(row=0, column=0, sticky="w")
+        )
+        shortcut_label.grid(row=0, column=0, sticky="w")
         quit_button = make_button(
             footer,
             "종료",

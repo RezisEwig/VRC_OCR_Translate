@@ -19,3 +19,6 @@ class TranslationCache:
         self._items.move_to_end(key)
         while len(self._items) > self.capacity:
             self._items.popitem(last=False)
+
+    def clear(self) -> None:
+        self._items.clear()

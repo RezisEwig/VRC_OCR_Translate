@@ -104,3 +104,34 @@ def test_measured_bubble_coordinates_are_integers_at_vrchat_resolution():
     assert isinstance(bubble.height, int)
     assert isinstance(bubble.desired_left, int)
     assert isinstance(bubble.desired_top, int)
+
+
+def test_tiny_source_text_uses_compact_default_subtitle_bubble():
+    renderer = PositionedTranslationRenderer(OverlayConfig())
+    image = Image.new("RGBA", (1920, 1009))
+    bubble = renderer._measure_block(
+        ImageDraw.Draw(image),
+        image.size,
+        TranslationBlock(
+            "tiny",
+            "작은 글씨",
+            BoundingBox(800, 400, 840, 406),
+        ),
+    )
+
+    assert bubble.font_size == 10
+    assert bubble.height < 30
+
+
+def test_dense_paragraph_uses_character_density_instead_of_box_height():
+    renderer = PositionedTranslationRenderer(OverlayConfig())
+    block = TranslationBlock(
+        "小さい文字" * 60,
+        "작은 글씨로 된 긴 문단입니다. " * 30,
+        BoundingBox(800, 350, 1769, 420),
+    )
+
+    font_size = renderer._estimate_font_size(block)
+
+    assert font_size <= 18
+    assert font_size < int(block.bounds.height * 0.82)

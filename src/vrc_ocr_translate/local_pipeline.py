@@ -7,8 +7,9 @@ from PIL import Image
 
 from .config import AppConfig
 from .grouping import group_ocr_lines
-from .local_ocr import RapidJapaneseOcr
+from .local_ocr import RapidMultilingualOcr
 from .local_translation import LlamaServer, TranslateGemmaTranslator
+from .languages import normalize_language_code
 from .models import ImageTranslationResult, TranslationBlock
 
 LOGGER = logging.getLogger(__name__)
@@ -17,7 +18,10 @@ LOGGER = logging.getLogger(__name__)
 class LocalImageTranslator:
     def __init__(self, config: AppConfig) -> None:
         self._config = config
-        self._ocr = RapidJapaneseOcr(config.ocr)
+        self._ocr = RapidMultilingualOcr(
+            config.ocr,
+            config.translation.source_language,
+        )
         self._server = LlamaServer(config.translation)
         self._translator = TranslateGemmaTranslator(config.translation, self._server)
 
@@ -26,6 +30,13 @@ class LocalImageTranslator:
 
     def close(self) -> None:
         self._server.close()
+
+    def set_target_language(self, language_code: str) -> None:
+        self._translator.set_target_language(language_code)
+
+    def set_source_language(self, language_code: str) -> None:
+        self._ocr.set_source_language(language_code)
+        self._translator.set_source_language(language_code)
 
     def translate(self, image: Image.Image) -> ImageTranslationResult:
         started = time.monotonic()
@@ -61,7 +72,11 @@ class LocalImageTranslator:
             time.monotonic() - started,
             len(blocks),
         )
-        return ImageTranslationResult("ja", "ko", tuple(blocks))
+        return ImageTranslationResult(
+            "auto",
+            normalize_language_code(self._config.translation.target_language),
+            tuple(blocks),
+        )
 
     def __enter__(self) -> "LocalImageTranslator":
         self.start()

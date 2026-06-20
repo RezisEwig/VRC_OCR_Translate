@@ -8,10 +8,21 @@ from typing import Any
 from .calibration import PositionCalibrationController
 from .capture import create_capture
 from .change_detection import FrameChangeDetector
-from .config import AppConfig
+from .config import (
+    AppConfig,
+    save_source_language,
+    save_start_mode,
+    save_target_language,
+)
 from .control_panel import ControlPanel, ControlPanelStatus
 from .controls import ControlEvents, KeyboardModeToggle, SteamVRControllerInput
 from .local_pipeline import LocalImageTranslator
+from .languages import (
+    font_path_for_language,
+    get_language,
+    normalize_language_code,
+    normalize_source_language,
+)
 from .overlay import SteamVROverlay
 from .renderer import PositionedTranslationRenderer
 
@@ -31,7 +42,16 @@ class TranslationOverlayApp:
         self.config_path = config_path
 
     def run(self) -> None:
-        renderer = PositionedTranslationRenderer(self.config.overlay)
+        target_language = normalize_language_code(
+            self.config.translation.target_language
+        )
+        source_language = normalize_source_language(
+            self.config.translation.source_language
+        )
+        renderer = PositionedTranslationRenderer(
+            self.config.overlay,
+            font_path_for_language(target_language, self.config.overlay.font_path),
+        )
         detector = FrameChangeDetector(self.config.capture.change_threshold)
         automatic_interval = max(0.1, self.config.capture.interval_ms / 1000)
         poll_interval = max(0.02, self.config.controls.poll_interval_ms / 1000)
@@ -55,7 +75,12 @@ class TranslationOverlayApp:
         def update_control_panel() -> None:
             if control_panel is not None:
                 control_panel.update(
-                    ControlPanelStatus.from_overlay(mode, self.config.overlay)
+                    ControlPanelStatus.from_overlay(
+                        mode,
+                        self.config.overlay,
+                        target_language,
+                        source_language,
+                    )
                 )
 
         with ExitStack() as stack:
@@ -65,7 +90,12 @@ class TranslationOverlayApp:
                 try:
                     control_panel = ControlPanel()
                     control_panel.start(
-                        ControlPanelStatus.from_overlay(mode, self.config.overlay)
+                        ControlPanelStatus.from_overlay(
+                            mode,
+                            self.config.overlay,
+                            target_language,
+                            source_language,
+                        )
                     )
                     stack.callback(control_panel.close)
                     LOGGER.info("Desktop control panel started")
@@ -113,6 +143,8 @@ class TranslationOverlayApp:
 
                 if keyboard_toggle.poll():
                     mode = "manual" if mode == "automatic" else "automatic"
+                    self.config.controls.start_mode = mode
+                    save_start_mode(self.config_path, mode)
                     LOGGER.info("Translation mode changed: %s", mode)
                     if mode == "automatic":
                         next_automatic_at = time.monotonic()
@@ -129,6 +161,8 @@ class TranslationOverlayApp:
                             ui_clear = True
                         elif command.name == "toggle_mode":
                             mode = "manual" if mode == "automatic" else "automatic"
+                            self.config.controls.start_mode = mode
+                            save_start_mode(self.config_path, mode)
                             LOGGER.info("Translation mode changed from control panel: %s", mode)
                             if mode == "automatic":
                                 next_automatic_at = time.monotonic()
@@ -137,12 +171,76 @@ class TranslationOverlayApp:
                             next_mode = _translation_mode(command.mode)
                             if next_mode != mode:
                                 mode = next_mode
+                                self.config.controls.start_mode = mode
+                                save_start_mode(self.config_path, mode)
                                 LOGGER.info(
                                     "Translation mode changed from control panel: %s",
                                     mode,
                                 )
                                 if mode == "automatic":
                                     next_automatic_at = time.monotonic()
+                                update_control_panel()
+                        elif (
+                            command.name == "set_language"
+                            and command.language is not None
+                        ):
+                            next_language = normalize_language_code(command.language)
+                            if next_language != target_language:
+                                target_language = next_language
+                                translator.set_target_language(target_language)
+                                save_target_language(
+                                    self.config_path,
+                                    target_language,
+                                )
+                                renderer = PositionedTranslationRenderer(
+                                    self.config.overlay,
+                                    font_path_for_language(
+                                        target_language,
+                                        self.config.overlay.font_path,
+                                    ),
+                                )
+                                overlay.hide()
+                                previous_signature = ()
+                                last_result = None
+                                last_frame_size = None
+                                if mode == "automatic":
+                                    next_automatic_at = time.monotonic()
+                                LOGGER.info(
+                                    "Target language changed: %s (%s)",
+                                    target_language,
+                                    get_language(target_language).english_name,
+                                )
+                                update_control_panel()
+                        elif (
+                            command.name == "set_source_language"
+                            and command.source_language is not None
+                        ):
+                            next_source = normalize_source_language(
+                                command.source_language
+                            )
+                            if next_source != source_language:
+                                source_language = next_source
+                                translator.set_source_language(source_language)
+                                save_source_language(
+                                    self.config_path,
+                                    source_language,
+                                )
+                                overlay.hide()
+                                previous_signature = ()
+                                last_result = None
+                                last_frame_size = None
+                                if mode == "automatic":
+                                    next_automatic_at = time.monotonic()
+                                source_name = (
+                                    "automatic detection"
+                                    if source_language == "auto"
+                                    else get_language(source_language).english_name
+                                )
+                                LOGGER.info(
+                                    "Source language changed: %s (%s)",
+                                    source_language,
+                                    source_name,
+                                )
                                 update_control_panel()
                         elif command.name == "move":
                             ui_calibration_changed |= calibration.move(
