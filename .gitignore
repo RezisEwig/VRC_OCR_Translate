@@ -20,6 +20,8 @@ recordings/
 *.mov
 *.webm
 !assets/demo.mp4
+!assets/demo-en.mp4
+!assets/demo-ja.mp4
 .tmp/
 *-translated-overlay.png
 demo-subtitle.png

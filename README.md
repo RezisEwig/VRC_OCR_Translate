@@ -87,6 +87,16 @@ cd VRC_OCR_Translate
 | **자막 지우기** | VR에 떠 있는 번역 자막 전체 삭제 |
 | **자막 위치** | 방향, 크기, 초기화 버튼으로 오버레이 보정 |
 
+### 다국어 UI 미리보기
+
+<p align="center">
+  <img src="assets/control-panel-ko.png" alt="한국어 컨트롤 패널" width="220">
+  <img src="assets/control-panel-en.png" alt="English control panel" width="220">
+  <br>
+  <img src="assets/control-panel-ja.png" alt="日本語コントロールパネル" width="220">
+  <img src="assets/control-panel-zh-tw.png" alt="繁體中文控制面板" width="220">
+</p>
+
 **번역할 언어**는 원문의 언어입니다. 여러 언어가 섞여 나오면 `자동 인식`을 사용하세요. 일본어 월드처럼 원문 언어를 이미 안다면 `日本語`처럼 하나를 직접 고를 수 있습니다. 이 경우 필요한 OCR 인식기 하나만 실행하므로 CPU 사용량과 OCR 시간이 줄어듭니다.
 
 원문 언어를 정확히 지정하면 언어 감지 단계를 건너뛰고 해당 언어 전용 OCR과 번역 프롬프트를 사용하므로 **자동 인식보다 번역 품질도 일반적으로 좋아집니다.** 특히 `日本語 → 한국어` 조합은 일본어 전용 OCR과 일본어→한국어 전용 프롬프트를 사용합니다.
@@ -210,7 +220,7 @@ No API key or external translation service is required. OCR and translation run 
 
 ## 🎬 Demo
 
-[![Automatic translation, manual translation, and subtitle positioning](assets/demo-preview.gif)](assets/demo.mp4)
+[![Automatic translation, manual translation, and subtitle positioning](assets/demo-preview-en.gif)](assets/demo-en.mp4)
 
 The GIF plays directly in GitHub. Click it to open the full 1080p demo video.
 
@@ -248,6 +258,10 @@ The first installation downloads about 3 GB. The installer automatically prepare
 | **Translate now** | Translate the current view once and keep the result visible |
 | **Clear subtitles** | Remove every floating translation subtitle |
 | **Subtitle position** | Move, scale, or reset the overlay alignment |
+
+<p align="center">
+  <img src="assets/control-panel-en.png" alt="English control panel" width="360">
+</p>
 
 Use **Auto detect** when several languages may appear together. When you already know the source language, select it explicitly. This skips language guessing and runs only the appropriate OCR recognizer, reducing CPU work and usually improving translation accuracy and speed.
 
@@ -336,7 +350,7 @@ APIキーや外部翻訳サービスは不要です。OCRと翻訳はすべてPC
 
 ## 🎬 デモ動画
 
-[![自動翻訳、手動翻訳、字幕位置調整のデモ](assets/demo-preview.gif)](assets/demo.mp4)
+[![自動翻訳、手動翻訳、字幕位置調整のデモ](assets/demo-preview-ja.gif)](assets/demo-ja.mp4)
 
 GIFはGitHub上でそのまま再生されます。クリックすると1080pのデモ動画を開けます。
 
@@ -374,6 +388,10 @@ PowerShellやPythonの知識は必要ありません。
 | **今すぐ翻訳** | 現在の画面を1回翻訳し、そのまま表示 |
 | **字幕を消去** | VRに表示中の翻訳字幕をすべて削除 |
 | **字幕位置** | オーバーレイの移動、拡大縮小、初期化 |
+
+<p align="center">
+  <img src="assets/control-panel-ja.png" alt="日本語コントロールパネル" width="360">
+</p>
 
 複数言語が混在する場合は **自動検出** が便利です。原文の言語が分かっている場合は、個別言語を指定してください。言語判定を省略して必要なOCRモデルだけを実行するため、CPU負荷と処理時間が減り、通常は翻訳精度も向上します。
 

@@ -10,7 +10,28 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FONT_PATH = Path("C:/Windows/Fonts/malgunbd.ttf")
+FONT_PATHS = {
+    "ko": Path("C:/Windows/Fonts/malgunbd.ttf"),
+    "en": Path("C:/Windows/Fonts/segoeuib.ttf"),
+    "ja": Path("C:/Windows/Fonts/YuGothB.ttc"),
+}
+BADGE_TEXT = {
+    "ko": (
+        ("1. 자동 번역", "2초 간격으로 화면 변화를 확인", (0, 226, 255)),
+        ("2. 수동 번역", "왼쪽 트리거: 번역 / 그립: 지우기", (172, 106, 255)),
+        ("3. 위치 조정", "Ctrl + Alt + 방향키", (255, 111, 97)),
+    ),
+    "en": (
+        ("1. Automatic Translation", "Checks screen changes every 2 seconds", (0, 226, 255)),
+        ("2. Manual Translation", "Left trigger: translate / Grip: clear", (172, 106, 255)),
+        ("3. Position Adjustment", "Ctrl + Alt + Arrow keys", (255, 111, 97)),
+    ),
+    "ja": (
+        ("1. 自動翻訳", "2秒ごとに画面の変化を確認", (0, 226, 255)),
+        ("2. 手動翻訳", "左トリガー: 翻訳 / グリップ: 消去", (172, 106, 255)),
+        ("3. 位置調整", "Ctrl + Alt + 矢印キー", (255, 111, 97)),
+    ),
+}
 
 
 def _ffmpeg_executable() -> str:
@@ -31,8 +52,8 @@ def _run(command: list[str]) -> None:
     subprocess.run(command, check=True)
 
 
-def _font(size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(str(FONT_PATH), size)
+def _font(path: Path, size: int) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(str(path), size)
 
 
 def _make_intro(hero_path: Path, output: Path) -> None:
@@ -41,13 +62,23 @@ def _make_intro(hero_path: Path, output: Path) -> None:
     background.save(output)
 
 
-def _make_badge(title: str, detail: str, accent: tuple[int, int, int], output: Path) -> None:
-    image = Image.new("RGBA", (940, 126), (0, 0, 0, 0))
+def _make_badge(
+    title: str,
+    detail: str,
+    accent: tuple[int, int, int],
+    font_path: Path,
+    output: Path,
+) -> None:
+    image = Image.new("RGBA", (1200, 126), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image, "RGBA")
-    draw.rounded_rectangle((0, 0, 940, 126), radius=24, fill=(5, 10, 25, 225))
+    draw.rounded_rectangle((0, 0, 1200, 126), radius=24, fill=(5, 10, 25, 225))
     draw.rounded_rectangle((0, 0, 15, 126), radius=7, fill=(*accent, 255))
-    draw.text((38, 17), title, font=_font(42), fill=(255, 255, 255, 255))
-    draw.text((340, 28), detail, font=_font(30), fill=(200, 215, 235, 255))
+    title_font = _font(font_path, 38)
+    detail_font = _font(font_path, 28)
+    title_box = draw.textbbox((38, 20), title, font=title_font)
+    detail_x = max(340, title_box[2] + 42)
+    draw.text((38, 20), title, font=title_font, fill=(255, 255, 255, 255))
+    draw.text((detail_x, 30), detail, font=detail_font, fill=(200, 215, 235, 255))
     image.save(output)
 
 
@@ -78,9 +109,17 @@ def _make_preview(ffmpeg: str, video: Path, output: Path) -> None:
     )
 
 
-def build(source: Path, hero: Path, output: Path, preview: Path) -> None:
+def build(
+    source: Path,
+    hero: Path,
+    output: Path,
+    preview: Path,
+    language: str = "ko",
+) -> None:
     ffmpeg = _ffmpeg_executable()
     output.parent.mkdir(parents=True, exist_ok=True)
+    font_path = FONT_PATHS[language]
+    badges = BADGE_TEXT[language]
 
     with tempfile.TemporaryDirectory(prefix="vrc-demo-") as temporary:
         work = Path(temporary)
@@ -92,9 +131,9 @@ def build(source: Path, hero: Path, output: Path, preview: Path) -> None:
         position_badge = work / "position.png"
 
         _make_intro(hero, intro_image)
-        _make_badge("1. 자동 번역", "2초 간격으로 화면 변화를 확인", (0, 226, 255), auto_badge)
-        _make_badge("2. 수동 번역", "왼쪽 트리거: 번역 / 그립: 지우기", (172, 106, 255), manual_badge)
-        _make_badge("3. 위치 조정", "Ctrl + Alt + 방향키", (255, 111, 97), position_badge)
+        _make_badge(*badges[0], font_path, auto_badge)
+        _make_badge(*badges[1], font_path, manual_badge)
+        _make_badge(*badges[2], font_path, position_badge)
 
         _run(
             [
@@ -219,6 +258,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build the public demonstration video")
     parser.add_argument("source", type=Path, help="Original 1920x1080 demonstration video")
     parser.add_argument(
+        "--language",
+        choices=tuple(BADGE_TEXT),
+        default="ko",
+        help="language used for the feature badges",
+    )
+    parser.add_argument(
         "--hero",
         type=Path,
         default=ROOT / "assets/vrc-ocr-translate-hero.png",
@@ -239,6 +284,7 @@ def main() -> int:
         args.hero.resolve(),
         args.output.resolve(),
         args.preview.resolve(),
+        args.language,
     )
     print(f"Demo video written to {args.output.resolve()}")
     print(f"GIF preview written to {args.preview.resolve()}")
